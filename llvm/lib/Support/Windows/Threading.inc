@@ -107,6 +107,31 @@ void llvm::get_thread_name(SmallVectorImpl<char> &Name) {
 }
 
 SetThreadPriorityResult llvm::set_thread_priority(ThreadPriority Priority) {
+
+  typedef BOOL(WINAPI * SetThreadInformation_t)(
+      HANDLE hThread, THREAD_INFORMATION_CLASS ThreadInformationClass,
+      _In_reads_bytes_(ThreadInformationSize) PVOID ThreadInformation,
+      ULONG ThreadInformationSize);
+  static const auto pfnSetThreadInformation =
+      (SetThreadInformation_t)GetProcAddress(
+          GetModuleHandle(TEXT("kernel32.dll")), "SetThreadInformation");
+
+  if (pfnSetThreadInformation) {
+    if (Priority == ThreadPriority::Background) {
+      // Use EcoQoS for ThreadPriority::Background available (running on most
+      // efficent cores at the most efficient cpu frequency):
+      // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setthreadinformation
+      // https://learn.microsoft.com/en-us/windows/win32/procthread/quality-of-service
+      THREAD_POWER_THROTTLING_STATE state;
+      memset(&state, 0, sizeof(state));
+      state.Version = THREAD_POWER_THROTTLING_CURRENT_VERSION;
+      state.ControlMask = THREAD_POWER_THROTTLING_EXECUTION_SPEED;
+      state.StateMask = THREAD_POWER_THROTTLING_EXECUTION_SPEED;
+      pfnSetThreadInformation(GetCurrentThread(), ThreadPowerThrottling, &state,
+                              sizeof(state));
+    }
+  }
+
   // https://docs.microsoft.com/en-us/windows/desktop/api/processthreadsapi/nf-processthreadsapi-setthreadpriority
   // Begin background processing mode. The system lowers the resource scheduling
   // priorities of the thread so that it can perform background work without
